@@ -1,4 +1,4 @@
-# 🚗 Deep Reinforcement Learning — Autonomous Highway Driving
+# Deep Reinforcement Learning — Autonomous Highway Driving
 
 > A Deep Q-Network (DQN) agent trained from scratch to navigate a multi-lane highway, maximising velocity while avoiding collisions — visualised live in the browser.
 
