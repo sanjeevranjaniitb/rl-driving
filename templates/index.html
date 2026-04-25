@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>RL Autonomous Driving</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:#0a0e1a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;height:100vh;padding:10px 14px;display:flex;flex-direction:column;background-image:radial-gradient(ellipse at 20% 50%,#0d1f3c 0%,transparent 60%),radial-gradient(ellipse at 80% 20%,#0d2a1f 0%,transparent 50%)}
+
+/* ── HEADER ── */
+.header{text-align:center;margin-bottom:8px;flex-shrink:0}
+.header h1{font-size:1.1rem;font-weight:800;background:linear-gradient(135deg,#60a5fa,#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:1px}
+.header p{font-size:0.68rem;color:#64748b;margin-top:2px}
+
+/* ── LAYOUT ── */
+.layout{display:grid;grid-template-columns:1fr 280px;gap:12px;flex:1;min-height:0}
+
+/* ── HIGHWAY WRAPPER ── */
+.highway-wrap{position:relative;border-radius:14px;overflow:hidden;border:1px solid #1e293b;box-shadow:0 0 40px #0d1f3c;min-height:0}
+#highway{display:block;width:100%;height:100%}
+
+/* ── HUD on canvas ── */
+.hud{position:absolute;top:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap}
+.hud-pill{background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:3px 10px;font-size:0.65rem;font-weight:600;color:#94a3b8}
+.hud-pill span{color:#60a5fa}
+
+/* ── PANEL ── */
+.panel{display:flex;flex-direction:column;gap:7px;min-height:0;overflow:hidden}
+
+/* ── GLASS CARD ── */
+.card{background:rgba(15,23,42,0.7);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:9px 11px;box-shadow:0 4px 16px rgba(0,0,0,0.4);flex-shrink:0}
+.card-title{font-size:0.58rem;text-transform:uppercase;letter-spacing:1.5px;color:#475569;margin-bottom:7px;display:flex;align-items:center;gap:5px}
+.card-title::before{content:'';display:inline-block;width:3px;height:10px;border-radius:2px;background:linear-gradient(#60a5fa,#34d399)}
+
+/* ── STATS GRID ── */
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.stat{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:8px;padding:5px 8px}
+.stat .lbl{font-size:0.55rem;text-transform:uppercase;letter-spacing:1px;color:#475569;margin-bottom:1px}
+.stat .val{font-size:0.95rem;font-weight:700;color:#f1f5f9}
+.stat .val.blue{color:#60a5fa}
+.stat .val.green{color:#34d399}
+.stat .val.orange{color:#fb923c}
+.stat .val.red{color:#f87171}
+
+/* ── ACTION DISPLAY ── */
+.action-wrap{text-align:center;padding:4px 0}
+#action-badge{display:inline-flex;align-items:center;padding:5px 16px;border-radius:20px;font-weight:700;font-size:0.8rem;letter-spacing:.5px;border:1px solid rgba(255,255,255,0.1)}
+.action-hint{font-size:0.6rem;color:#334155;margin-top:5px;text-align:center;line-height:1.6}
+
+/* ── LEGEND ── */
+.legend-item{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:0.68rem;color:#94a3b8;border-bottom:1px solid rgba(255,255,255,0.04)}
+.legend-item:last-child{border-bottom:none}
+.legend-icon{width:26px;height:12px;border-radius:3px;flex-shrink:0}
+
+/* ── CHART ── */
+#chartCanvas{width:100%;height:55px;display:block}
+.chart-label{display:flex;justify-content:space-between;font-size:0.55rem;color:#334155;margin-top:2px}
+
+/* ── GOAL TEXT ── */
+.goal-text{font-size:0.68rem;color:#94a3b8;line-height:1.5}
+.goal-text b{color:#e2e8f0}
+
+/* ── STATUS ── */
+#status{font-size:0.62rem;color:#34d399;margin-top:4px;display:flex;align-items:center;gap:5px}
+#status::before{content:'';display:inline-block;width:5px;height:5px;border-radius:50%;background:#34d399;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Reinforcement Learning — Autonomous Highway Driving</h1>
+  <p>A Deep Q-Network agent learns to navigate a 4-lane highway by maximising speed while avoiding collisions</p>
+</div>
+
+<div class="layout">
+
+  <!-- ── HIGHWAY CANVAS ── -->
+  <div class="highway-wrap">
+    <canvas id="highway"></canvas>
+    <div class="hud">
+      <div class="hud-pill">Episode <span id="h-ep">0</span></div>
+      <div class="hud-pill">Step <span id="h-step">0</span></div>
+      <div class="hud-pill">Speed <span id="h-spd">0</span> km/h</div>
+      <div class="hud-pill">ε <span id="h-eps">1.000</span></div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT PANEL ── -->
+  <div class="panel">
+
+    <!-- Goal -->
+    <div class="card">
+      <div class="card-title">Objective</div>
+      <p class="goal-text">
+        The <b style="color:#fb923c">orange car</b> drives fast on a 4-lane highway without hitting
+        <b style="color:#60a5fa">blue NPC vehicles</b>. Reward = speed − collision penalty.
+        Agent starts random (ε=1) and learns as ε decays to 0.01.
+      </p>
+    </div>
+
+    <!-- Live Stats -->
+    <div class="card">
+      <div class="card-title">Live Training Stats</div>
+      <div class="stats">
+        <div class="stat"><div class="lbl">Episode</div><div class="val blue" id="ep">0</div></div>
+        <div class="stat"><div class="lbl">Step</div><div class="val" id="step">0</div></div>
+        <div class="stat"><div class="lbl">Step Reward</div><div class="val green" id="rew">0.000</div></div>
+        <div class="stat"><div class="lbl">Total Reward</div><div class="val orange" id="total">0.00</div></div>
+        <div class="stat"><div class="lbl">Epsilon ε</div><div class="val" id="eps">1.000</div></div>
+        <div class="stat"><div class="lbl">Vehicles</div><div class="val" id="vcnt">0</div></div>
+      </div>
+
+    </div>
+
+    <!-- Action -->
+    <div class="card">
+      <div class="card-title">Current Action</div>
+      <div class="action-wrap">
+        <span id="action-badge">IDLE</span>
+      </div>
+      <div class="action-hint">
+        LANE LEFT &nbsp;·&nbsp; IDLE &nbsp;·&nbsp; LANE RIGHT<br>
+        FASTER &nbsp;·&nbsp; SLOWER
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="card">
+      <div class="card-title">Legend</div>
+      <div class="legend-item">
+        <div class="legend-icon" style="background:linear-gradient(135deg,#fb923c,#f97316)"></div>
+        Ego car — the agent being trained
+      </div>
+      <div class="legend-item">
+        <div class="legend-icon" style="background:linear-gradient(135deg,#3b82f6,#2563eb)"></div>
+        NPC vehicles — traffic obstacles
+      </div>
+      <div class="legend-item">
+        <div class="legend-icon" style="background:repeating-linear-gradient(90deg,#fff 0,#fff 12px,transparent 12px,transparent 22px);background-color:#374151;border:1px solid #4b5563"></div>
+        Dashed lane dividers
+      </div>
+      <div class="legend-item">
+        <div class="legend-icon" style="background:#f87171"></div>
+        Collision flash — episode ends
+      </div>
+    </div>
+
+    <!-- Reward Chart -->
+    <div class="card">
+      <div class="card-title">Reward per Episode</div>
+      <canvas id="chartCanvas"></canvas>
+      <div class="chart-label"><span>oldest</span><span>latest</span></div>
+      <div id="status">Waiting for simulation...</div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── Canvas setup ──────────────────────────────────────────────────────────────
+const canvas = document.getElementById("highway");
+const ctx    = canvas.getContext("2d");
+
+function resize() {
+  canvas.width  = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
+const LANES  = 4;
+const ROAD_TOP = () => canvas.height * 0.12;
+const ROAD_BOT = () => canvas.height * 0.88;
+const ROAD_H   = () => ROAD_BOT() - ROAD_TOP();
+const LANE_H   = () => ROAD_H() / LANES;
+const W        = () => canvas.width;
+const H        = () => canvas.height;
+
+const CAR_W = 52, CAR_H = 24;
+let roadOffset = 0, lastEgoX = 0, egoSpeed = 0;
+
+// ── Road ──────────────────────────────────────────────────────────────────────
+function drawRoad(offset) {
+  const w = W(), h = H(), rt = ROAD_TOP(), rb = ROAD_BOT(), rh = ROAD_H();
+
+  // Sky gradient
+  const sky = ctx.createLinearGradient(0, 0, 0, rt);
+  sky.addColorStop(0, "#060d1f");
+  sky.addColorStop(1, "#0d1f3c");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, rt);
+
+  // Horizon glow
+  ctx.save();
+  const hglow = ctx.createRadialGradient(w/2, rt, 0, w/2, rt, w*0.6);
+  hglow.addColorStop(0, "rgba(30,80,160,0.25)");
+  hglow.addColorStop(1, "transparent");
+  ctx.fillStyle = hglow;
+  ctx.fillRect(0, 0, w, rt + 20);
+  ctx.restore();
+
+  // Asphalt
+  const asphalt = ctx.createLinearGradient(0, rt, 0, rb);
+  asphalt.addColorStop(0, "#1c2333");
+  asphalt.addColorStop(0.5, "#161d2e");
+  asphalt.addColorStop(1, "#111827");
+  ctx.fillStyle = asphalt;
+  ctx.fillRect(0, rt, w, rh);
+
+  // Subtle road texture lines
+  ctx.strokeStyle = "rgba(255,255,255,0.015)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 6; i++) {
+    const y = rt + (rh / 6) * i;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+
+  // Guardrails top & bottom
+  drawGuardrail(0, rt - 8, w, offset);
+  drawGuardrail(0, rb + 2, w, offset);
+
+  // Solid road edges
+  ctx.strokeStyle = "#e2e8f0";
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, rt); ctx.lineTo(w, rt); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, rb); ctx.lineTo(w, rb); ctx.stroke();
+
+  // Dashed lane dividers
+  for (let l = 1; l < LANES; l++) {
+    const y = rt + l * LANE_H();
+    ctx.save();
+    ctx.setLineDash([36, 24]);
+    ctx.lineDashOffset = -(offset % 60);
+    ctx.strokeStyle = "rgba(200,210,230,0.5)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    ctx.restore();
+  }
+
+  // Ground below road
+  const ground = ctx.createLinearGradient(0, rb, 0, h);
+  ground.addColorStop(0, "#0f1520");
+  ground.addColorStop(1, "#080c14");
+  ctx.fillStyle = ground;
+  ctx.fillRect(0, rb, w, h - rb);
+
+  // Distance markers
+  ctx.font = "10px monospace";
+  const ms = 150;
+  const start = Math.floor(offset / ms) * ms;
+  for (let mx = start; mx < start + w + ms; mx += ms) {
+    const sx = mx - offset;
+    if (sx < 0 || sx > w) continue;
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(sx - 1, rb, 2, 12);
+    ctx.fillStyle = "#334155";
+    ctx.fillText(`${Math.round(mx)}m`, sx - 14, rb + 22);
+  }
+}
+
+function drawGuardrail(x, y, w, offset) {
+  // Rail beam
+  ctx.fillStyle = "#94a3b8";
+  ctx.fillRect(x, y, w, 5);
+  // Posts
+  const postSpacing = 60;
+  const start = Math.floor(offset / postSpacing) * postSpacing;
+  for (let px = start; px < start + w + postSpacing; px += postSpacing) {
+    const sx = px - offset;
+    if (sx < 0 || sx > w) continue;
+    ctx.fillStyle = "#64748b";
+    ctx.fillRect(sx - 3, y - 4, 6, 14);
+  }
+}
+
+// ── Car drawing ───────────────────────────────────────────────────────────────
+function drawCar(cx, cy, isEgo, speed, crashed) {
+  const cw = CAR_W, ch = CAR_H;
+  const bodyColor  = crashed ? "#ef4444" : isEgo ? "#f97316" : "#3b82f6";
+  const roofColor  = crashed ? "#dc2626" : isEgo ? "#ea580c" : "#2563eb";
+  const glowColor  = crashed ? "rgba(239,68,68,0.5)" : isEgo ? "rgba(249,115,22,0.4)" : "rgba(59,130,246,0.3)";
+
+  ctx.save();
+
+  // Drop shadow
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur  = isEgo ? 24 : 14;
+
+  // Car body (lower)
+  ctx.fillStyle = bodyColor;
+  roundRect(ctx, cx - cw/2, cy - ch/2 + 6, cw, ch - 6, 5);
+  ctx.fill();
+
+  // Car roof (upper cabin)
+  ctx.fillStyle = roofColor;
+  roundRect(ctx, cx - cw/2 + 10, cy - ch/2, cw - 20, ch/2 + 2, 4);
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+
+  // Windshield (front)
+  ctx.fillStyle = "rgba(186,230,253,0.55)";
+  roundRect(ctx, cx + cw/2 - 18, cy - ch/2 + 2, 12, ch/2 - 1, 2);
+  ctx.fill();
+
+  // Rear window
+  ctx.fillStyle = "rgba(186,230,253,0.35)";
+  roundRect(ctx, cx - cw/2 + 6, cy - ch/2 + 2, 10, ch/2 - 1, 2);
+  ctx.fill();
+
+  // Headlights (front)
+  ctx.fillStyle = isEgo ? "#fef9c3" : "#dbeafe";
+  ctx.shadowColor = isEgo ? "rgba(254,249,195,0.9)" : "rgba(219,234,254,0.7)";
+  ctx.shadowBlur = 10;
+  ctx.fillRect(cx + cw/2 - 5, cy - ch/2 + 8, 5, 4);
+  ctx.fillRect(cx + cw/2 - 5, cy + ch/2 - 12, 5, 4);
+
+  // Tail lights (rear)
+  ctx.fillStyle = "#fca5a5";
+  ctx.shadowColor = "rgba(252,165,165,0.8)";
+  ctx.shadowBlur = 8;
+  ctx.fillRect(cx - cw/2, cy - ch/2 + 8, 5, 4);
+  ctx.fillRect(cx - cw/2, cy + ch/2 - 12, 5, 4);
+
+  ctx.shadowBlur = 0;
+
+  // Wheels (4 corners)
+  ctx.fillStyle = "#0f172a";
+  const wheels = [
+    [cx - cw/2 + 10, cy - ch/2 - 3],
+    [cx + cw/2 - 18, cy - ch/2 - 3],
+    [cx - cw/2 + 10, cy + ch/2 - 1],
+    [cx + cw/2 - 18, cy + ch/2 - 1],
+  ];
+  wheels.forEach(([wx, wy]) => {
+    ctx.fillRect(wx, wy, 12, 5);
+    // Wheel rim
+    ctx.fillStyle = "#475569";
+    ctx.fillRect(wx + 3, wy + 1, 6, 3);
+    ctx.fillStyle = "#0f172a";
+  });
+
+  // Speed label above ego
+  if (isEgo) {
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#fef3c7";
+    ctx.font = "bold 11px 'Segoe UI'";
+    ctx.fillText(`${Math.round(speed)} km/h`, cx - 22, cy - ch/2 - 8);
+  }
+
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// ── Coordinate mapping ────────────────────────────────────────────────────────
+function worldToCanvasX(vx, egoX) {
+  return W() * 0.38 + (vx - egoX) * 2.2;
+}
+function laneToCanvasY(lane) {
+  return ROAD_TOP() + (Math.max(0, Math.min(LANES - 1, lane)) + 0.5) * LANE_H();
+}
+
+// ── Reward chart ──────────────────────────────────────────────────────────────
+function drawChart(rewards) {
+  const c = document.getElementById("chartCanvas");
+  c.width  = c.offsetWidth;
+  c.height = 80;
+  const cx = c.getContext("2d");
+  const cw = c.width, ch = c.height;
+  cx.clearRect(0, 0, cw, ch);
+  if (rewards.length < 2) return;
+
+  const mn = Math.min(...rewards), mx = Math.max(...rewards);
+  const range = mx - mn || 1;
+  const toY = v => ch - 6 - ((v - mn) / range) * (ch - 12);
+  const toX = i => (i / (rewards.length - 1)) * cw;
+
+  // Grid lines
+  cx.strokeStyle = "rgba(255,255,255,0.04)";
+  cx.lineWidth = 1;
+  for (let i = 0; i < 4; i++) {
+    const y = (ch / 4) * i;
+    cx.beginPath(); cx.moveTo(0, y); cx.lineTo(cw, y); cx.stroke();
+  }
+
+  // Fill area
+  const grad = cx.createLinearGradient(0, 0, 0, ch);
+  grad.addColorStop(0, "rgba(96,165,250,0.3)");
+  grad.addColorStop(1, "rgba(96,165,250,0.02)");
+  cx.beginPath();
+  cx.moveTo(toX(0), ch);
+  rewards.forEach((r, i) => cx.lineTo(toX(i), toY(r)));
+  cx.lineTo(toX(rewards.length - 1), ch);
+  cx.closePath();
+  cx.fillStyle = grad;
+  cx.fill();
+
+  // Line
+  cx.beginPath();
+  rewards.forEach((r, i) => i === 0 ? cx.moveTo(toX(i), toY(r)) : cx.lineTo(toX(i), toY(r)));
+  cx.strokeStyle = "#60a5fa";
+  cx.lineWidth = 2;
+  cx.lineJoin = "round";
+  cx.stroke();
+
+  // Latest dot
+  const lx = toX(rewards.length - 1), ly = toY(rewards[rewards.length - 1]);
+  cx.beginPath();
+  cx.arc(lx, ly, 4, 0, Math.PI * 2);
+  cx.fillStyle = "#60a5fa";
+  cx.fill();
+}
+
+// ── Action colours ────────────────────────────────────────────────────────────
+const ACTION_STYLE = {
+  "LANE LEFT":  {bg:"rgba(234,179,8,0.15)",  border:"rgba(234,179,8,0.5)",  color:"#fbbf24", icon:""},
+  "IDLE":       {bg:"rgba(96,165,250,0.12)", border:"rgba(96,165,250,0.4)", color:"#60a5fa", icon:""},
+  "LANE RIGHT": {bg:"rgba(234,179,8,0.15)",  border:"rgba(234,179,8,0.5)",  color:"#fbbf24", icon:""},
+  "FASTER":     {bg:"rgba(52,211,153,0.12)", border:"rgba(52,211,153,0.4)", color:"#34d399", icon:""},
+  "SLOWER":     {bg:"rgba(248,113,113,0.12)",border:"rgba(248,113,113,0.4)",color:"#f87171", icon:""},
+};
+
+// ── SSE ───────────────────────────────────────────────────────────────────────
+const es = new EventSource("/stream");
+let crashed = false;
+
+es.onmessage = (e) => {
+  const d = JSON.parse(e.data);
+
+  // HUD pills
+  document.getElementById("h-ep").textContent   = d.episode;
+  document.getElementById("h-step").textContent = d.step;
+  document.getElementById("h-spd").textContent  = Math.round(egoSpeed);
+  document.getElementById("h-eps").textContent  = d.epsilon;
+
+  // Panel stats
+  document.getElementById("ep").textContent    = d.episode;
+  document.getElementById("step").textContent  = d.step;
+  document.getElementById("rew").textContent   = d.reward;
+  document.getElementById("total").textContent = d.total_reward;
+  document.getElementById("eps").textContent   = d.epsilon;
+  document.getElementById("vcnt").textContent  = d.vehicles.length;
+
+  // Status
+  document.getElementById("status").textContent =
+    d.running ? `Training... episode ${d.episode} / 300` : "Training complete";
+
+  // Action badge
+  const badge = document.getElementById("action-badge");
+  const name  = d.action_name || "IDLE";
+  const style = ACTION_STYLE[name] || ACTION_STYLE["IDLE"];
+  badge.textContent = name;
+  badge.style.cssText = `background:${style.bg};border:1px solid ${style.border};color:${style.color};display:inline-flex;align-items:center;gap:8px;padding:8px 22px;border-radius:24px;font-weight:700;font-size:0.95rem;letter-spacing:.5px`;
+
+  crashed = d.done;
+  drawChart(d.episode_rewards || []);
+
+  // ── Render highway ──
+  const vehicles = d.vehicles || [];
+  const ego = vehicles.find(v => v.ego);
+  const egoX = ego ? ego.x : lastEgoX;
+  lastEgoX = egoX;
+  egoSpeed = ego ? ego.vx * 3.6 : 0;
+  document.getElementById("h-spd").textContent = Math.round(egoSpeed);
+
+  roadOffset = Math.max(0, egoX * 2.2 - W() * 0.38);
+
+  ctx.clearRect(0, 0, W(), H());
+  drawRoad(roadOffset);
+
+  // Sort: NPC first, ego on top
+  const sorted = [...vehicles].sort((a, b) => a.ego - b.ego);
+  sorted.forEach(v => {
+    const cx2 = worldToCanvasX(v.x, egoX);
+    if (cx2 < -80 || cx2 > W() + 80) return;
+    const cy2 = laneToCanvasY(v.lane);
+    drawCar(cx2, cy2, v.ego, v.vx * 3.6, v.ego && crashed);
+  });
+
+  // Crash overlay
+  if (crashed) {
+    ctx.fillStyle = "rgba(239,68,68,0.15)";
+    ctx.fillRect(0, 0, W(), H());
+    ctx.save();
+    ctx.shadowColor = "#ef4444";
+    ctx.shadowBlur  = 30;
+    ctx.fillStyle   = "#fca5a5";
+    ctx.font        = "bold 26px 'Segoe UI'";
+    ctx.textAlign   = "center";
+    ctx.fillText("COLLISION — Episode Reset", W()/2, H()/2);
+    ctx.restore();
+  }
+};
+</script>
+</body>
+</html>
